@@ -16,3 +16,502 @@ df_retail.info()
 #Convert InvoiceDate to 'datetime'
 df_retail['InvoiceDate'] = pd.to_datetime(df_retail['InvoiceDate'])
 df_retail.info()
+
+#Extract year & month
+df_retail['year'] = df_retail['InvoiceDate'].dt.year
+df_retail['month'] = df_retail['InvoiceDate'].dt.month
+df_retail['InvoiceYearMonth'] = df_retail['InvoiceDate'].dt.strftime('%Y%m')
+
+#df_retail.head(5)
+
+#Calculate revenue = unitprice * quantity
+df_retail['Revenue'] = df_retail['UnitPrice']* df_retail['Quantity']
+
+Q1. Monthly Growth rate by revenue ?
+
+df_revenue = df_retail.groupby('InvoiceYearMonth')['Revenue'].sum().reset_index()
+
+pct_change_list = [0] #If only run loop, the result has only 12 values because pct_change start calculate ion the second value. So must make a '0' value to match with df_revenue
+for i in range(len(df_revenue)-1): #Because this df has 13 rows but start at 0
+    pct_change = (df_revenue['Revenue'][i+1] - df_revenue['Revenue'][i])/df_revenue['Revenue'][i]
+    pct_change_list.append(pct_change)
+print(pct_change_list)
+
+df_revenue['pct_change'] = pct_change_list
+
+plot_data = [
+    go.Scatter(
+        x= df_revenue[df_revenue['InvoiceYearMonth'] !='201112']['InvoiceYearMonth'],
+        y= df_revenue[df_revenue['pct_change'] != '201112']['pct_change'],)
+]    
+
+plot_layout = go.Layout(
+    xaxis= {"type":"category"},
+    title = 'Monthly Growth Rate')
+
+fig = go.Figure(data=plot_data, layout = plot_layout)
+pyoff.plot(fig)
+
+Q2.Monthly Active Customers
+df_retail['Country'].value_counts()
+#United Kingdom has overwhelming numbers of active, so we focus on this country
+
+df_uk = df_retail[df_retail['Country'] =='United Kingdom'].reset_index(drop = True) # can't using inplace
+
+df_monthly_active = df_uk.groupby('InvoiceYearMonth')['CustomerID'].nunique().reset_index()
+df_monthly_active
+
+plot_data = [
+    go.Bar(
+        x= df_monthly_active['InvoiceYearMonth'],
+        y= df_monthly_active['CustomerID'],
+                             ) 
+]    
+
+plot_layout = go.Layout(
+    xaxis= {"type":"category"},
+    title = 'Monthly Active Customers')
+
+fig = go.Figure(data=plot_data, layout = plot_layout)
+pyoff.plot(fig)
+
+Q3. What is average of products sold and revenue by month ? 
+df_monthly_sales = df_uk.groupby('InvoiceYearMonth')['Quantity'].sum().reset_index()
+df_monthly_sales
+
+plot_data = [
+    go.Scatter(
+        x= df_monthly_sales['InvoiceYearMonth'] ,
+        y= df_monthly_sales['Quantity'] ,)
+]    
+
+plot_layout = go.Layout(
+    xaxis= {"type":"category"},
+    title = 'Monthly Sold Products')
+
+fig = go.Figure(data=plot_data, layout = plot_layout)
+pyoff.plot(fig)
+
+mean_quantity = df_monthly_sales['Quantity'].mean()
+mean_quantity = round(mean_quantity,2)
+mean_quantity
+
+#Above is the result for mean of sold products 
+df_monthly_order_avg = df_uk.groupby('InvoiceYearMonth')['Revenue'].mean().reset_index() 
+df_monthly_order_avg
+
+#Above is the result for the average of revenue by month
+
+Q4. Find New & Existing Customers
+#Find minimum of Invoice date for each customers
+df_min_purchase = df_uk.groupby('CustomerID').InvoiceDate.min().reset_index()
+
+df_min_purchase.columns= ['CustomerID' , 'MinPurchase']
+df_min_purchase
+
+df_min_purchase['MinPurchasedYearMonth'] = df_min_purchase['MinPurchase'].map(lambda x: x.year*100 + x.month) #Other way to extract & concat year - month
+
+#Join df_min_purchase with df_uk
+df_uk = pd.merge(df_uk, df_min_purchase, on ='CustomerID') 
+df_uk 
+
+#df_uk.loc[df_uk['InvoiceYearMonth'] == df_uk['MinPurchasedYearMonth'],'UserType' ] = 'New' 
+#df_uk.loc[df_uk['InvoiceYearMonth'] != df_uk['MinPurchasedYearMonth'],'UserType' ] = 'Existing' 
+# failed, try if else
+df_uk.info()
+# I saw the format of 2 columns that try to compare is not match, so must convert 1 of 2
+
+df_uk['InvoiceYearMonth'] = pd.to_numeric(df_retail['InvoiceYearMonth'])
+
+def compare_and_label(row):
+  if row['InvoiceYearMonth'] == row['MinPurchasedYearMonth']:
+    return 'New'
+  else:
+    return 'Existing'
+
+# Apply the function to each row and create a new column
+df_uk['New_Existing'] = df_uk.apply(compare_and_label, axis=1)
+
+print(df_uk)
+
+df_uk['New_Existing'].value_counts()
+
+df_uk = df_uk.rename(columns={'New_Exisiting': 'UserType'})
+df_uk.head(5)
+
+df_user_type_revenue = df_uk.groupby(['InvoiceYearMonth','New_Existing'])['Revenue'].sum().reset_index()
+
+df_user_type_revenue = df_user_type_revenue.query("InvoiceYearMonth != 201012 and InvoiceYearMonth!= 201112")
+#Exclude first and last month
+
+plot_data = [
+    go.Scatter(
+    x=df_user_type_revenue.query("New_Existing == 'Existing'")['InvoiceYearMonth'],
+    y=df_user_type_revenue.query("New_Existing == 'Existing'")['Revenue'],
+    name = 'Existing'),
+    go.Scatter(
+    x=df_user_type_revenue.query("New_Existing == 'New'")['InvoiceYearMonth'],
+    y=df_user_type_revenue.query("New_Existing == 'New'")['Revenue'],
+    name = 'New')
+]
+
+plot_layout = go.Layout(
+    xaxis={"type":"category"},
+    title='Revenue of New vs Existing Customers')
+
+fig = go.Figure(data = plot_data, layout = plot_layout)
+pyoff.plot(fig)
+
+Q5. Monthly New Customers Ratio
+countNew = df_uk.query("New_Existing == 'New'").groupby(['InvoiceYearMonth'])['CustomerID'].nunique()
+
+countExisting = df_uk.query("New_Existing == 'Existing'").groupby(['InvoiceYearMonth'])['CustomerID'].nunique()
+
+df_user_ratio = countNew/countExisting
+df_user_ratio
+
+df_user_ratiov = df_user_ratio.dropna()
+
+df_user_ratiov = df_user_ratiov.reset_index()
+df_user_ratiov
+
+plot_data = [
+    go.Bar(
+        x=df_user_ratiov['InvoiceYearMonth'],
+        y=df_user_ratiov['CustomerID'],)
+]
+
+plot_layout = go.Layout(
+    xaxis = {"type" :"category"},
+    title = 'New Customers Ratio')
+
+fig = go.Figure(data = plot_data, layout = plot_layout)
+pyoff.plot(fig)
+
+q6. Monthly Retention Rate 
+df_uk['InvoiceYearMonth'] = df_uk['InvoiceDate'].map(lambda date: 100*date.year + date.month)
+
+df_monthly_active = df_uk.groupby('InvoiceYearMonth')['CustomerID'].nunique().reset_index()
+
+df_user_purchase = df_uk.groupby(['CustomerID','InvoiceYearMonth'])['Revenue'].sum().astype(int).reset_index()
+df_user_purchase
+
+df_retention = pd.crosstab(df_user_purchase['CustomerID'], df_user_purchase['InvoiceYearMonth']).reset_index()
+
+months = df_retention.columns
+months
+
+#The table is resulted by customer_id and invoiceyearmonth, if value is 0, the customer didn't buy in this month
+
+retention_array = []
+for i in range(len(months)-1):
+    retention_data = {}
+    selected_month = months[i+1]
+    prev_month = months[i] 
+    retention_data['InvoiceYearMonth'] = int(selected_month)
+    retention_data['TotalUserCount'] = df_retention[selected_month].sum()
+    retention_data['RetainedUserCount'] = df_retention[(df_retention[selected_month]==1) & (df_retention[prev_month]==1)][selected_month].sum()
+    retention_array.append(retention_data)
+    print("*******" + str(selected_month) + "*******") 
+    print(retention_array)
+    #Make an array can show value by month, include previous month
+	
+df_retention = pd.DataFrame(retention_array)
+df_retention
+
+#In 201101, there are 322 customers in 201012 still had purchase. Similar to the remaining months
+
+df_retention['RetentionRate'] = df_retention['RetainedUserCount']/df_retention['TotalUserCount']
+df_retention
+
+plot_data = [
+    go.Scatter(
+    x= df_retention['InvoiceYearMonth'],
+    y= df_retention['RetentionRate'],
+    name='organic'
+    )
+]
+
+plot_layout = go.Layout(
+    xaxis = {"type":"category"},
+    title = 'Monthly Retention Rate')
+fig = go.Figure(data = plot_data, layout = plot_layout)
+pyoff.plot(fig)
+
+Q6. Churn rate
+df_retention['ChurnRate'] = 1 - df_retention['RetentionRate']
+df_retention
+
+plot_data = [
+    go.Scatter(
+    x= df_retention.query("InvoiceYearMonth>201101")['InvoiceYearMonth'],
+    y= df_retention.query("InvoiceYearMonth>201101")['ChurnRate'],
+    name='organic'
+    )
+]
+
+plot_layout = go.Layout(
+    xaxis = {"type":"category"},
+    title = 'Monthly Churn Rate')
+fig = go.Figure(data = plot_data, layout = plot_layout)
+pyoff.plot(fig)
+#Exclude month 201012
+
+Q7. Cohort analysis rate
+df_min_purchase.head(5)
+
+df_min_purchase['MinPurchasedYearMonth'] = df_min_purchase['MinPurchase'].map(lambda date: 100*date.year + date.month)
+
+df_retention.head(5)
+
+df_retention = pd.crosstab(df_user_purchase['CustomerID'], df_user_purchase['InvoiceYearMonth']).reset_index()
+
+df_retention = pd.merge(df_retention, df_min_purchase[['CustomerID','MinPurchasedYearMonth']], on = 'CustomerID')
+df_retention
+
+months = df_retention.columns[2:]
+
+months =df_retention.columns[1:-1]
+months
+
+total_user_count = df_retention[df_retention['MinPurchasedYearMonth'] ==201101]['MinPurchasedYearMonth'].count()
+total_user_count
+
+new_column_names = ['m_' + str(column) for column in df_retention.columns[1:-1]] 
+new_column_names.append('CustomerID')
+new_column_names.append('MinPurchasedYearMonth') 
+df_retention.columns = new_column_names
+
+df_retention.query("MinPurchasedYearMonth ==201101 and {} ==1".format(str('m_' +str(201104))))['m_' +str(201104)].sum()/total_user_count
+
+retention_array = []
+for i in range(len(months)):
+    retention_data = {}
+    selected_month = months[i]
+    prev_months = months[:i]
+    next_months = months[i+1:]
+    for prev_month in prev_months:
+        retention_data[prev_month] = np.nan #All values of prev month is NaN
+        
+    total_user_count = df_retention[df_retention['MinPurchasedYearMonth'] == selected_month]['MinPurchasedYearMonth'].count()
+    retention_data['TotalUserCount'] = total_user_count 
+    retention_data[selected_month] =1
+    
+    query = "MinPurchasedYearMonth == {}".format(selected_month) 
+    
+    for next_month in next_months:
+        new_query = query + "and {} >0".format(str('m_' +str(next_month)))
+        retention_data[next_month] = np.round(df_retention.query(new_query)['m_' + str(next_month)].sum()/total_user_count,2)
+    retention_array.append(retention_data)
+    
+df_retention = pd.DataFrame(retention_array)
+
+df_retention
+
+# Customer Segmentation - Using RFM
+
+from sklearn.cluster import KMeans
+from datetime import datetime, timedelta, date  
+
+df_retail.info()
+
+df_uk['InvoiceDate'] = pd.to_datetime(df_uk['InvoiceDate']).dt.date
+
+df_3m = df_uk[(df_uk.InvoiceDate < date(2011,6,1)) & (df_uk.InvoiceDate >= date(2011,3,1))].reset_index()
+
+df_user = pd.DataFrame(df_3m['CustomerID'].unique()) 
+
+df_user.columns = ['CustomerID']
+
+df_max_purchase = df_3m.groupby('CustomerID').InvoiceDate.max().reset_index()
+
+df_max_purchase.columns = ['CustomerID', 'MaxPurchaseDate']
+df_max_purchase
+
+df_max_purchase['Recency'] = (df_max_purchase['MaxPurchaseDate'].max() - df_max_purchase['MaxPurchaseDate']).dt.days
+df_max_purchase
+
+#Join with df_user
+df_user = pd.merge(df_user, df_max_purchase[['CustomerID','Recency']], on = 'CustomerID')
+
+df_user.Recency.describe()
+
+plot_data = [
+    go.Histogram(
+        x=df_user['Recency'])
+]
+plot_layout = go.Layout(
+    title = 'Recency')
+fig = go.Figure(data = plot_data, layout = plot_layout)
+pyoff.plot(fig) 
+
+#In range recency = [5,15] has the most of customers
+
+sse = {}
+df_recency = df_user[['Recency']]
+for k in range(1,10):
+    kmeans = KMeans(n_clusters=k, max_iter=1000).fit(df_recency) #max_iter : Number of loops that we want to run
+    df_recency["clusters"] = kmeans.labels_
+    sse[k] = kmeans.inertia_
+plt.figure()
+plt.plot(list(sse.keys()), list(sse.values()))
+plt.xlabel("Number of cluster")
+plt.show()
+
+kmeans = KMeans(n_clusters =4)
+kmeans.fit(df_user[['Recency']])
+df_user['RecencyCluster'] = kmeans.predict(df_user[['Recency']])
+
+df_user.groupby('RecencyCluster')['Recency'].describe()
+
+#Sort follow by recencycluster and mean 
+df_new = df_user.groupby('RecencyCluster')['Recency'].mean().reset_index()
+df_new = df_new.sort_values(by='Recency', ascending = False).reset_index(drop=True)
+df_new['index'] = df_new.index 
+df_user = pd.merge(df_user, df_new[['RecencyCluster','index']], on = 'RecencyCluster')
+df_user = df_user.drop(['RecencyCluster'], axis=1)
+df_user = df_user.rename(columns={"index":"RecencyCluster"})
+
+# Frequency 
+# Count how many times does customers buy 
+df_frequency = df_3m.groupby('CustomerID').InvoiceDate.count().reset_index()
+
+df_frequency.columns= ['CustomerID', 'Frequency']
+
+df_user = pd.merge(df_user,df_frequency, on='CustomerID')
+df_user
+
+plot_data = [
+    go.Histogram(
+        x=df_user.query('Frequency<1000')['Frequency'])
+]
+
+plot_layout = go.Layout(
+    title = 'Frequency')
+fig = go.Figure(data = plot_data, layout= plot_layout) 
+pyoff.plot(fig) 
+
+#Numbers of time that customers buy often from under 100
+
+sse = {}
+df_frequency = df_user[['Frequency']]
+for k in range(1,10):
+    kmeans = KMeans(n_clusters=k, max_iter=1000).fit(df_frequency) #max_iter : Number of loops that we want to run
+    df_frequency["clusters"] = kmeans.labels_
+    sse[k] = kmeans.inertia_
+plt.figure()
+plt.plot(list(sse.keys()), list(sse.values()))
+plt.xlabel("Number of cluster")
+plt.show()
+
+kmeans = KMeans(n_clusters =4)
+kmeans.fit(df_user[['Frequency']])
+df_user['FrequencyCluster'] = kmeans.predict(df_user[['Frequency']])
+
+df_user.groupby('FrequencyCluster')['Frequency'].describe()
+
+#Sort follow by frecquencycluster and mean 
+df_new = df_user.groupby('FrequencyCluster')['Frequency'].mean().reset_index()
+df_new = df_new.sort_values(by='Frequency', ascending = True).reset_index(drop=True)
+df_new['index'] = df_new.index 
+df_user = pd.merge(df_user, df_new[['FrequencyCluster','index']], on = 'FrequencyCluster')
+df_user = df_user.drop(['FrequencyCluster'], axis=1)
+df_user = df_user.rename(columns={"index":"FrequencyCluster"})
+
+#Monetary
+df_3m['Revenue'] = df_3m['UnitPrice'] * df_3m['Quantity']
+
+df_revenue_3m = df_3m.groupby('CustomerID').Revenue.sum().reset_index()
+
+df_user = pd.merge(df_user, df_revenue_3m, on='CustomerID')
+df_user
+
+plot_data = [
+    go.Histogram(
+        x=df_user.query('Revenue<10000')['Revenue'])
+]
+
+plot_layout = go.Layout(
+    title = 'Monetary Value')
+fig = go.Figure(data = plot_data, layout= plot_layout) 
+pyoff.plot(fig) 
+
+sse = {}
+df_revenue_3m = df_user[['Revenue']]
+for k in range(1,10):
+    kmeans = KMeans(n_clusters=k, max_iter=1000).fit(df_revenue_3m) #max_iter : Number of loops that we want to run
+    df_revenue_3m["clusters"] = kmeans.labels_
+    sse[k] = kmeans.inertia_
+plt.figure()
+plt.plot(list(sse.keys()), list(sse.values()))
+plt.xlabel("Number of cluster")
+plt.show()
+
+kmeans = KMeans(n_clusters =4)
+kmeans.fit(df_user[['Revenue']])
+df_user['RevenueCluster'] = kmeans.predict(df_user[['Revenue']])
+
+#Sort follow by frecquencycluster and mean 
+df_new = df_user.groupby('RevenueCluster')['Revenue'].mean().reset_index()
+df_new = df_new.sort_values(by='Revenue', ascending = True).reset_index(drop=True)
+df_new['index'] = df_new.index 
+df_user = pd.merge(df_user, df_new[['RevenueCluster','index']], on = 'RevenueCluster')
+df_user = df_user.drop(['RevenueCluster'], axis=1)
+df_user = df_user.rename(columns={"index":"RevenueCluster"})
+
+df_user 
+
+df_user['OverallScore'] = df_user['RecencyCluster'] + df_user['FrequencyCluster'] +df_user['RevenueCluster']
+df_user 
+
+df_user.groupby('OverallScore')['Recency', 'Frequency', 'Revenue'].mean()
+
+df_user['Segment'] = 'Low Value'
+df_user.loc[df_user['OverallScore']>2, 'Segment'] = 'Mid Value'
+df_user.loc[df_user['OverallScore']>4, 'Segment'] = 'High Value'
+
+#Visualize
+df_graph = df_user.query("Revenue < 50000 and Frequency < 2000") 
+
+plot_data = [
+    go.Scatter(
+        x=df_graph.query("Segment =='Low Value'")['Frequency'],
+        y=df_graph.query("Segment =='Low Value'")['Revenue'],
+        mode = 'markers',
+        name = 'Low',
+        marker=dict(size=7,
+                   line=dict(width=1),
+                   color='blue',
+                   opacity=0.8)
+    ),
+        go.Scatter(
+        x=df_graph.query("Segment =='Mid Value'")['Frequency'],
+        y=df_graph.query("Segment =='Mid Value'")['Revenue'],
+        mode = 'markers',
+        name = 'Mid',
+        marker=dict(size=7,
+                   line=dict(width=1),
+                   color='green',
+                   opacity=0.5)
+    ),
+            go.Scatter(
+        x=df_graph.query("Segment =='High Value'")['Frequency'],
+        y=df_graph.query("Segment =='High Value'")['Revenue'],
+        mode = 'markers',
+        name = 'High',
+        marker=dict(size=11,
+                   line=dict(width=1),
+                   color='red',
+                   opacity=0.9)
+            ),  
+]
+
+plot_layout = go.Layout(
+     yaxis = {'title':"Revenue"},
+     xaxis = {'title':"Frequency"},
+     title = 'Segments'
+ )
+                
+fig = go.Figure(data =plot_data, layout = plot_layout)
+pyoff.plot(fig) 
+
