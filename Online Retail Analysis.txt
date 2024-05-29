@@ -1,0 +1,18 @@
+#Import needed library, data
+from datetime import datetime, timedelta
+import pandas as pd 
+import matplotlib.pyplot as plt 
+import numpy as np 
+import seaborn as sns 
+import plotly.offline as pyoff
+import plotly.graph_objs as go
+
+#df_retail = pd.read_csv('C:\\Users\\LU VINH XUYEN\\Downloads\\OnlineRetail.csv')
+df_retail = pd.read_csv('C:\\Users\\LU VINH XUYEN\\Downloads\\onlineretail.csv',  encoding='latin-1')
+df_retail.head()
+
+df_retail.info()
+
+#Convert InvoiceDate to 'datetime'
+df_retail['InvoiceDate'] = pd.to_datetime(df_retail['InvoiceDate'])
+df_retail.info()
